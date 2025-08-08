@@ -4,7 +4,7 @@
 
 [![📄 Paper](https://img.shields.io/badge/Paper-arXiv%3A2504.11082-blue)](https://arxiv.org/abs/2504.11082)
 
-![DeepMLF Architecture](figs/deepmlf.jpg)
+<img src="figs/deepmlf.jpg" width="400">
 </div>
 
 ## Abstract
