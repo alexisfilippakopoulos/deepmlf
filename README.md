@@ -9,7 +9,7 @@
 
 ## Abstract
 
-While multimodal fusion has been extensively studied in \emph{multimodal sentiment analysis} (MSA) due to rich cross-modal complementary information, the role of fusion depth and multimodal capacity allocation have not been fully explored. In this work, we introduce \ours, a novel multimodal language model design with learnable tokens tailored toward deep fusion. \ours leverages an audiovisual encoder and a pretrained decoder language model (LM) augmented with multimodal information across its layers. \ours appends learnable tokens to the LM with two objectives: 1) to capture modality interactions in a controlled fashion, and 2) to preserve independent information propagation for each modality. Fusion tokens gather linguistic information via causal self-attention within the LM, and are then integrated with audiovisual information through cross-attention blocks, acting as dedicated multimodal capacity. This design enables progressive fusion across multiple layers, providing fusion depth. Our training recipe combines modality-specific losses and LM loss, with the decoder LM predicting ground truth polarity. We evaluate \ours on three MSA benchmarks, demonstrating improved performance over state-of-the-art methods across different languages, dataset sizes, and modality imbalance scenarios. Our results confirm that deeper fusion leads to better performance, with optimal fusion depths (5-7) exceeding existing approaches. Analysis reveals that few (8-20) tokens achieve optimal performance, providing insights on ideal capacity allocation. Through comprehensive experiments, we examine fusion curriculum, demonstrate scalability to large language models, and analyze language distribution effects and regularization impact. Our findings position fusion depth, scalability, and dedicated multimodal capacity as primary factors for effective multimodal fusion.
+While multimodal fusion has been extensively studied in \emph{multimodal sentiment analysis} (MSA) due to rich cross-modal complementary information, the role of fusion depth and multimodal capacity allocation have not been fully explored. In this work, we introduce DeepMLF, a novel multimodal language model design with learnable tokens tailored toward deep fusion. DeepMLF leverages an audiovisual encoder and a pretrained decoder language model (LM) augmented with multimodal information across its layers. DeepMLF appends learnable tokens to the LM with two objectives: 1) to capture modality interactions in a controlled fashion, and 2) to preserve independent information propagation for each modality. Fusion tokens gather linguistic information via causal self-attention within the LM, and are then integrated with audiovisual information through cross-attention blocks, acting as dedicated multimodal capacity. This design enables progressive fusion across multiple layers, providing fusion depth. Our training recipe combines modality-specific losses and LM loss, with the decoder LM predicting ground truth polarity. We evaluate DeepMLF on three MSA benchmarks, demonstrating improved performance over state-of-the-art methods across different languages, dataset sizes, and modality imbalance scenarios. Our results confirm that deeper fusion leads to better performance, with optimal fusion depths (5-7) exceeding existing approaches. Analysis reveals that few (8-20) tokens achieve optimal performance, providing insights on ideal capacity allocation. Through comprehensive experiments, we examine fusion curriculum, demonstrate scalability to large language models, and analyze language distribution effects and regularization impact. Our findings position fusion depth, scalability, and dedicated multimodal capacity as primary factors for effective multimodal fusion.
 
 ## TL;DR
 
@@ -89,10 +89,10 @@ python experiments/regression/mult_base.py -m msalm -d sims -g 0 --exp-name deep
 
 Inside the `MMSA` folder we can modify the following scripts to customize your experiments
 
-- [`models/`](models/) - Core model implementations, `MSALM.py` for DeepMLF
-- [`trains/`](trains/) - Training scripts and utilities, `MSALM.py` for DeepMLF
-- [`data_loader.py`](data_loader.py) - Data loading and preprocessing
-- [`config/`](config/) - Configuration files for different experiments
+- [`models/`](MMSA/models/) - Core model implementations, `MSALM.py` for DeepMLF
+- [`trains/`](MMSA/trains/) - Training scripts and utilities, `MSALM.py` for DeepMLF
+- [`data_loader.py`](MMSA/data_loader.py) - Data loading and preprocessing
+- [`config/`](MMSA/config/) - Configuration files for different experiments
 
 ## 📄 Citation
 
@@ -121,5 +121,3 @@ If you find this work useful for your research, please consider citing our paper
 ## 📧 Contact
 
 For questions, collaborations, or issues, please contact me directly efthymios[dot]georgiou[at]unibe[dot]ch
-
----
