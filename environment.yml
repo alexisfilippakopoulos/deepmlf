@@ -23,7 +23,7 @@ dependencies:
     
     # Computer vision
     - opencv-contrib-python==4.7.0.68
-    - mediapipe==0.9.0.1
+    - mediapipe>=0.10.5
     - pillow==9.4.0
     
     # Data science
