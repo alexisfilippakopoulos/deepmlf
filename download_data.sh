@@ -6,11 +6,11 @@
 ###############################################################################
 #### Download MOSEI
 ###############################################################################
-mkdir mosei
-mkdir processed
-cd processed
-gdown <aligned>
-gdown <unaligned>
+#mkdir mosei
+#mkdir processed
+#cd processed
+#gdown <aligned>
+#gdown <unaligned>
 ### for large files
 ### 1.Copy link
 ### 2.New browser window
@@ -35,8 +35,8 @@ cd ..
 ###############################################################################
 #### Download SIMS
 ###############################################################################
-mkdir sims
-cd sims
-mkdir processed
-cd processed
+#mkdir sims
+#cd sims
+#mkdir processed
+#cd processed
  
