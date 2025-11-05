@@ -863,7 +863,7 @@ class MSALM(nn.Module):
             if 'gpt' in self.lm_flavor:
                 self.lang_encoder = AutoModelForCausalLM.from_pretrained(
                     lm_hf_path,
-                    local_files_only=True,
+                    local_files_only=False,
                     output_hidden_states=True,
                     use_cache=False,
                 )
