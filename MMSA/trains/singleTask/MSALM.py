@@ -27,6 +27,7 @@ class MSALM():
         self.args = args
         # bf16 - training
         self.use_bf16 = self.args.get("use_bf16", False)
+        self.use_bf16 = False
         if self.use_bf16:
             self.scaler = amp.GradScaler()
 
@@ -381,12 +382,16 @@ class MSALM():
                     
                     # language modality handling
                     raw_text = batch_data['raw_text']
-                    tokenized_inputs = model.Model.tokenizer(
-                        raw_text, return_tensors="pt",
-                        padding_side='right',
+                    tokenizer = model.Model.tokenizer
+                    tokenizer.padding_side = "right"  # ✅ set attribute instead of argument
+
+                    tokenized_inputs = tokenizer(
+                        raw_text,
+                        return_tensors="pt",
                         padding="max_length",
                         truncation=True
                     ).to(self.args.device)
+
                     text_ids = tokenized_inputs['input_ids']
                     
                     # 1 for valid positions and -1 for invalid --- Create binary mask
@@ -847,12 +852,16 @@ class MSALM():
                     audio = batch_data['audio'].to(self.args.device)
                     # language modality handling
                     raw_text = batch_data['raw_text']
-                    tokenized_inputs = model.Model.tokenizer(
-                        raw_text, return_tensors="pt",
-                        padding_side='right',
+                    tokenizer = model.Model.tokenizer
+                    tokenizer.padding_side = "right"  # ✅ set attribute instead of argument
+
+                    tokenized_inputs = tokenizer(
+                        raw_text,
+                        return_tensors="pt",
                         padding="max_length",
                         truncation=True
                     ).to(self.args.device)
+
                     text_ids = tokenized_inputs['input_ids']
                     attention_mask = tokenized_inputs['attention_mask']
 
@@ -892,7 +901,8 @@ class MSALM():
                             labels
                         )
                     elif self.modded_loss:
-                        with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+                        #with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+                        with torch.autocast(device_type='cuda', dtype=torch.float16):
                             outputs = model(text_ids, audio, vision, attention_mask=attention_mask)
                             task_logits = outputs['task_logits']
                             # av_logits = outputs['av_logits']
