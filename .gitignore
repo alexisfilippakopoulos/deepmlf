@@ -11,3 +11,6 @@ MMSA/transformations/pool/__pycache__/
 MMSA/utils/__pycache__/
 checkpoints/
 logs/
+EXECUTION_REPORT.md
+deepmlf_codebase_report.md
+IMPLEMENTATION_EXTENSION_REPORT.md

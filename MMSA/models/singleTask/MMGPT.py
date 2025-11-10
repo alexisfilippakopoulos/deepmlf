@@ -560,7 +560,8 @@ class AV_Enc(nn.Module):
         # # x_f = torch.cat((x_a, x_v), dim=2)[:, -1, :]
         # # x_f = torch.mean(torch.cat((x_a, x_v), dim=2), dim=1)
         # x_f = self.clf(F.dropout(self.fusion(x_f), p=0.0, training=self.training))
-        return x_f
+        #return x_f
+        return x_a, x_v, x_f
 
 @dataclass
 class GPTConfig:

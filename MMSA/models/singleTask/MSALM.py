@@ -991,7 +991,7 @@ class MSALM(nn.Module):
             self.lang_encoder.initialized_msalm
         ), "Flamingo layers are not initialized. Please call `init_flamingo` first."
 
-        av_x = self._encode_av(audio_x=audio_x, vision_x=vision_x)
+        a_x, v_x, av_x = self._encode_av(audio_x=audio_x, vision_x=vision_x)
         # print("calling _av_conditioning")
         self._av_conditioning(av_x)
 
@@ -1139,10 +1139,10 @@ class MSALM(nn.Module):
         rearrange code based on https://github.com/dhansmair/flamingo-mini
         """
         # get new conditioning
-        av_x = self.av_encoder(audio_x, vision_x)
+        a_x, v_x, av_x = self.av_encoder(audio_x, vision_x)
         if self.use_lnorm:
             av_x = self.LN(av_x)
-        return av_x
+        return a_x, v_x, av_x
     
 
 class Identity(nn.Module):
