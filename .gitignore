@@ -1,2 +1,13 @@
 MMSA/results/
 MMSA/checkpoints/
+MMSA/__pycache__/
+MMSA/models/__pycache__/
+MMSA/models/singleTask/__pycache__/
+MMSA/models/subNets/__pycache__/
+MMSA/models/subNets/transformers_encoder/__pycache__/
+MMSA/trains/__pycache__/
+MMSA/trains/singleTask/__pycache__/
+MMSA/transformations/pool/__pycache__/
+MMSA/utils/__pycache__/
+checkpoints/
+logs/
