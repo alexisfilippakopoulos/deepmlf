@@ -304,6 +304,7 @@ class MMBlock(nn.Module):
         x_q: the text-modality queries [B, L, D]
         x_k, x_v: the encoder's keys and values (context)
         """
+        print("EIMAI MESA STO GCA")
         # (B,L,D)
         norm_x_q = self.ln_1(x_q)
         # cross attention with the context x_k, x_v
@@ -311,6 +312,7 @@ class MMBlock(nn.Module):
         x_ca = self.attn(norm_x_q, x_kv)
         x = x_q + self.gate_1(self.alpha_1) * x_ca
         x = x + self.gate_2(self.alpha_2) * self.mlp(self.ln_2(x))
+        print("EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE", x.shape)
         return x
 
 
@@ -896,6 +898,7 @@ class MMGPT(nn.Module):
             pass
 
     def forward(self, idx, context=None):
+        print("MMGPT forward")
         device = idx.device
         # (B, L)
         b, t = idx.size()

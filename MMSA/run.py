@@ -122,7 +122,6 @@ def MMSA_run(
     # Initialization
     model_name = model_name.lower()
     dataset_name = dataset_name.lower()
-
     if config_file is not None:
         config_file = Path(config_file)
     else: # use default config files

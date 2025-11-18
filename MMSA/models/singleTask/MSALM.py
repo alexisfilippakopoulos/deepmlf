@@ -368,6 +368,7 @@ class MMBlock(nn.Module):
         # (B,L,D)
         # for use_cache = True
         # x_q, cache = x_q[0], x_q[1]
+        #import pdb; pdb.set_trace()
         x_q = x_q[0]
         norm_x_q = self.ln_1(x_q)
         # cross attention with the context x_k, x_v
@@ -408,7 +409,9 @@ class msaLMLayer(nn.Module):
         self.n_bn_fusion = n_bn_fusion
         self.max_len = max_len
         self.combine = combine
-        self.av_x = None
+        self.z_a = None
+        self.z_v = None
+        self.z_av = None
         self.lm_flavor = lm_flavor
         # self.ldrop = ldrop
         self.tie_ffw()
@@ -445,11 +448,13 @@ class msaLMLayer(nn.Module):
             
     def is_conditioned(self) -> bool:
         """Check whether the layer is conditioned."""
-        return self.av_x is not None
+        return self.z_av is not None
 
     # Used this great idea from this implementation of Flamingo (https://github.com/dhansmair/flamingo-mini/)
-    def condition_av_x(self, av_x):
-        self.av_x = av_x
+    def condition_av_x(self, z_a, z_v, z_av):
+        self.z_a = z_a
+        self.z_v = z_v
+        self.z_av = z_av
 
     def forward(
         self,
@@ -457,6 +462,7 @@ class msaLMLayer(nn.Module):
         attention_mask=None,
         **decoder_layer_kwargs,
     ):
+        #import pdb; pdb.set_trace()
         # Normal decoder layer
         lang_x = self.decoder_layer(
             lang_x, attention_mask=attention_mask, **decoder_layer_kwargs
@@ -464,18 +470,46 @@ class msaLMLayer(nn.Module):
         
         # Cross attention
         if self.ca_layer is not None:
-            if self.av_x is None:
-                raise ValueError("av_x must be conditioned before forward pass")
+            if self.z_av is None:
+                raise ValueError("z_av must be conditioned before forward pass")
 
             if self.n_bn_fusion > 0:
+                #import pdb; pdb.set_trace()
                 # BN fusion
                 # Extract the language part and the BN part
                 _lang_x = lang_x[0]
                 lang_part = _lang_x[:, :self.max_len, :]
                 bn_part = _lang_x[:, self.max_len:, :]
 
-                
                 if self.combine:
+                    updated_lang_x = self.ca_layer(
+                        x_q=(bn_part,), 
+                        z_a=self.z_a, 
+                        z_v=self.z_v, 
+                        z_av=self.z_av,
+                        x_prev=lang_part
+                    )[0]
+                else:
+                    bn_x = self.ca_layer(
+                        x_q=(bn_part,), 
+                        z_a=self.z_a, 
+                        z_v=self.z_v, 
+                        z_av=self.z_av
+                    )
+                    updated_lang_x = torch.cat((lang_part, bn_x[0]), dim=1)
+
+                lang_x = (updated_lang_x,)
+                
+            else:
+                # Standard non-BN case (if used)
+                lang_x = self.ca_layer(
+                    lang_x, 
+                    z_a=self.z_a, 
+                    z_v=self.z_v, 
+                    z_av=self.z_av
+                )
+
+                """if self.combine:
                     # combine always
                     updated_lang_x = self.ca_layer((bn_part,), self.av_x, lang_part)[0]
                     # Apply cross-attention to the BN par
@@ -489,7 +523,7 @@ class msaLMLayer(nn.Module):
                 lang_x = self.ca_layer(
                     lang_x,
                     self.av_x,
-                )
+                )"""
         return lang_x
 
 
@@ -679,10 +713,18 @@ class msaLMMixin(nn.Module):
         Propagates any changes made to self.gated_corss_attn_layers or self.old_decoder_blocks
         """
         old_decoder_blocks = self._get_decoder_layers()
-        ca_layers = nn.ModuleList(
+        """ca_layers = nn.ModuleList(
             [
                 MMBlock(
                     self.msa_config["mmgpt"], layer_idx
+                )
+                for layer_idx in range(len(ca_list))
+            ]
+        )"""
+        ca_layers = nn.ModuleList(
+            [
+                MoeMMBlock(
+                    self.msa_config["mmgpt"], layer_idx, top_k=2
                 )
                 for layer_idx in range(len(ca_list))
             ]
@@ -811,7 +853,7 @@ class msaLMMixin(nn.Module):
 
     def clear_conditioned_layers(self):
         for layer in self._get_decoder_layers():
-            layer.condition_av_x(None)
+            layer.condition_av_x(None, None, None)
 
 class MSALM(nn.Module):
     def __init__(self, config):
@@ -867,7 +909,7 @@ class MSALM(nn.Module):
                     output_hidden_states=True,
                     use_cache=False,
                 )
-            else:                
+            else:             
                 self.lang_encoder = AutoModelForCausalLM.from_pretrained(
                     lm_hf_path,
                     local_files_only=True,
@@ -987,13 +1029,13 @@ class MSALM(nn.Module):
                 shape (B, max_len, D)
             attention_mask (torch.Tensor, optional): Attention mask. Defaults to None.
         """
+        #import pdb; pdb.set_trace()
         assert (
             self.lang_encoder.initialized_msalm
-        ), "Flamingo layers are not initialized. Please call `init_flamingo` first."
-
-        a_x, v_x, av_x = self._encode_av(audio_x=audio_x, vision_x=vision_x)
+        ), "Flamingo layers are not initialized. Please call `init_flamingo` first."  
+        z_a, z_v, z_av = self._encode_av(audio_x=audio_x, vision_x=vision_x)
         # print("calling _av_conditioning")
-        self._av_conditioning(av_x)
+        self._av_conditioning(z_a, z_v, z_av)
 
         outputs = self.lang_encoder(
             input_ids=lang_x,
@@ -1027,11 +1069,11 @@ class MSALM(nn.Module):
             bn_tokens = last_hidden_states[:, self.max_token_len:, :]
             bn_logits = self.W_bn(bn_tokens)
             # av output
-            av_x = torch.mean(av_x, dim=1)
-            av_logits = self.W_av(av_x)
+            z_av = torch.mean(z_av, dim=1)
+            av_logits = self.W_av(z_av)
             # global fusion output
             avg_bn = torch.mean(bn_tokens, dim=1) # average over fusion tokens
-            task_outputs = self._task_map(torch.cat((avg_bn, last_hidden_text, av_x), dim=1))
+            task_outputs = self._task_map(torch.cat((avg_bn, last_hidden_text, z_av), dim=1))
             return {
                 "task_logits": task_outputs["task_logits"],
                 "text_logits": text_logits,
@@ -1040,7 +1082,7 @@ class MSALM(nn.Module):
                 "lm_logits": None,
                 "Feature_f": task_outputs["Feature_f"],
                 "Feature_t": last_hidden_text,
-                "Feature_av": av_x,
+                "Feature_av": z_av,
                 "Feature_bn": avg_bn
             }            
         else:
@@ -1073,24 +1115,24 @@ class MSALM(nn.Module):
                 bn_tokens = last_hidden_states[:, self.max_token_len:, :]
                 bn_logits = self.W_bn(bn_tokens)
                 # av output
-                av_x = torch.mean(av_x, dim=1)
-                av_logits = self.W_av(av_x)
+                z_av = torch.mean(z_av, dim=1)
+                av_logits = self.W_av(z_av)
                 # global fusion output
                 avg_bn = torch.mean(bn_tokens, dim=1) # average over fusion tokens
                 task_logits = self._task_map(
-                    torch.cat((avg_bn, last_hidden_text, av_x), dim=1)
+                    torch.cat((avg_bn, last_hidden_text, z_av), dim=1)
                 )
             else:        
                 # _, l_t, _ = last_hidden_states.size()
                 # task_logits = self._task_map(
-                #     torch.cat((last_hidden_states, torch.mean(av_x, dim=1, keepdim=True).expand(-1, l_t, -1)), dim=2)
+                #     torch.cat((last_hidden_states, torch.mean(z_av, dim=1, keepdim=True).expand(-1, l_t, -1)), dim=2)
                 # )
                 bn_logits = None
                 text_logits = None
                 task_logits = self._task_map(last_hidden_states)
                 if self.av_distil:
-                    av_x = torch.mean(av_x, dim=1)
-                    av_logits = self.av_dec(av_x)
+                    z_av = torch.mean(z_av, dim=1)
+                    av_logits = self.av_dec(z_av)
             
             return {
                 "task_logits": task_logits,
@@ -1112,7 +1154,7 @@ class MSALM(nn.Module):
         else:
             return self.W_task(h_last)
 
-    def _av_conditioning(self, av_x):
+    def _av_conditioning(self, z_a, z_v, z_av):
         # clear previous conditioning
         self.lang_encoder.clear_conditioned_layers()
 
@@ -1125,9 +1167,11 @@ class MSALM(nn.Module):
                 # layer.condition_av_x(_av_x)
                 
                 # No pooling
-                layer.condition_av_x(av_x)
+                #layer.condition_av_x(av_x)
+                layer.condition_av_x(z_a, z_v, z_av)
             else:
-                layer.condition_av_x(av_x)
+                #layer.condition_av_x(av_x)
+                layer.condition_av_x(z_a, z_v, z_av)
     
     def _encode_av(self, audio_x: torch.Tensor, vision_x: torch.Tensor):
         """
@@ -1139,10 +1183,12 @@ class MSALM(nn.Module):
         rearrange code based on https://github.com/dhansmair/flamingo-mini
         """
         # get new conditioning
-        a_x, v_x, av_x = self.av_encoder(audio_x, vision_x)
+        z_a, z_v, z_av = self.av_encoder(audio_x, vision_x)
         if self.use_lnorm:
-            av_x = self.LN(av_x)
-        return a_x, v_x, av_x
+            z_a = self.LN(z_a)
+            z_v = self.LN(z_v)
+            z_av = self.LN(z_av)
+        return z_a, z_v, z_av
     
 
 class Identity(nn.Module):
@@ -1151,3 +1197,173 @@ class Identity(nn.Module):
         
     def forward(self, x):
         return x
+    
+class FusionExpert(nn.Module):
+    def __init__(self, config, expert_type, idx):
+        super().__init__()
+        self.expert_type = expert_type
+        self.idx = idx
+        self.kdim = config.get("kv_dim", config.n_embd)
+        self.attn = MultiheadCrossAttention(
+            config.n_head,
+            config.n_embd,  # query dimension
+            self.kdim,      # key/value dimension
+            config.dropout,
+        )
+
+    def forward(self, norm_x_f, z_context):
+        x_expert = self.attn(norm_x_f, z_context)
+        return x_expert
+    
+class AudioExpert(FusionExpert):
+    def __init__(self, config, idx):
+        super().__init__(config, expert_type="audio", idx=idx)
+    
+
+class VisualExpert(FusionExpert):
+    def __init__(self, config, idx):
+        super().__init__(config, expert_type="visual", idx=idx)
+    
+
+class AudioVisualExpert(FusionExpert):
+    def __init__(self, config, idx):
+        super().__init__(config, expert_type="audio_visual", idx=idx)
+    
+class IdentityExpert(nn.Module):
+    def __init__(self, config, idx):
+        super().__init__()
+        self.idx = idx
+        self.expert_type = "identity"
+
+    def forward(self, x_f, z_context=None):
+        B, n_f, d = x_f.size()
+        return torch.zeros(B, n_f, d, device=x_f.device, dtype=x_f.dtype)
+    
+class SparseRouter(nn.Module):
+    def __init__(self, config, n_experts, top_k, idx):
+        super().__init__()
+        self.n_experts = n_experts
+        self.top_k = top_k
+        self.idx = idx
+        self.d = config.n_embd
+        self.router_weights = nn.Linear(self.d, n_experts)
+    
+    def forward(self, x_f):
+        q_pool = torch.mean(x_f, dim=1)
+        logits = self.router_weights(q_pool)
+        all_weights = F.softmax(logits, dim=-1)
+        top_k_weights, top_k_indices = torch.topk(all_weights, self.top_k, dim=-1)
+        top_k_weights = top_k_weights / (top_k_weights.sum(dim=-1, keepdim=True) + 1e-10)
+        return top_k_weights, top_k_indices, all_weights
+
+class MoeMMBlock(nn.Module):
+    """
+    Mixture-of-Experts Multimodal Block with Cross-Attention
+    """
+
+    def __init__(self, config, layer_idx, top_k):
+        super().__init__()
+        self.idx = layer_idx
+        self.top_k = top_k
+        self.lm_flavor = config.get("type", "llama")
+
+        self.audio_expert = AudioExpert(config, idx=layer_idx)
+        self.visual_expert = VisualExpert(config, idx=layer_idx)
+        self.av_expert = AudioVisualExpert(config, idx=layer_idx)
+        self.identity_expert = IdentityExpert(config, idx=layer_idx)
+
+        self.experts = nn.ModuleList([
+            self.audio_expert,
+            self.visual_expert,
+            self.av_expert,
+            self.identity_expert,
+        ])
+
+        self.router = SparseRouter(config, n_experts=len(self.experts), top_k=top_k, idx=layer_idx)
+
+        if "gpt" in self.lm_flavor:
+            self.kdim = config.get("kv_dim", config.n_embd)
+            self.ln_1 = LayerNorm(config.n_embd, config.bias)
+            self.ln_2 = LayerNorm(config.n_embd, config.bias)
+            if config.use_lora:
+                self.mlp = LoRA_MLP(config)
+            else:
+                self.mlp = MLP(config)
+        else: 
+            self.ln_1 = _LlamaRMSNorm(config.n_embd)
+            self.ln_2 = _LlamaRMSNorm(config.n_embd)
+            self.kdim = config.get("kv_dim", config.n_embd)
+            self.mlp = _LlamaMLP_LoRA(config) # adopt this to initialize at the same
+
+        print(f"Ongoing with ----- {config.gating} ----- gating")
+        self.gate_1 = nn.Sigmoid()
+        self.gate_2 = nn.Sigmoid()
+
+        init_value = config.get("init_gate", 0)
+        print(f"idx is {layer_idx}")
+        print(f"{init_value}")
+        if config.get("init_gate_2", None):
+            init_value_2 = config.get("init_gate_2")
+        else:
+            init_value_2 = init_value
+        if self.idx == -1:
+            self.alpha_1 = nn.Parameter(init_value * torch.ones(1))
+            self.alpha_2 = nn.Parameter(init_value_2 * torch.ones(1))
+        else:
+            self.alpha_1 = nn.Parameter(init_value[layer_idx] * torch.ones(1))
+            self.alpha_2 = nn.Parameter(init_value_2[layer_idx] * torch.ones(1))
+
+        # combined cross-attention
+        self.combine = config.get("combine", False)
+        #self.register_buffer('expert_usage', torch.zeros(4))
+        self.router_stats = []
+
+    def forward(self, x_q, z_a, z_v, z_av, x_prev=None, x_kv=None):
+        #import pdb; pdb.set_trace()
+        x_q = x_q[0]
+        B, _, D = x_q.size()
+        norm_x_q = self.ln_1(x_q)
+
+        top_k_weights, top_k_indices, all_weights = self.router(norm_x_q)
+
+        delta_x_f = torch.zeros_like(x_q)
+
+        context_map = {
+            0: z_a,   # Audio expert
+            1: z_v,   # Visual expert
+            2: z_av,  # AV expert
+            3: None,  # Identity expert (doesn't need context)
+        }
+
+        for b in range(B):
+            for k in range(self.top_k):
+                expert_idx = top_k_indices[b, k].item()
+                weight = top_k_weights[b, k]
+                
+                # Get expert and corresponding context
+                expert = self.experts[expert_idx]
+                context = context_map[expert_idx]
+
+                if context is not None:
+                    expert_output = expert(x_q[b:b+1], context[b:b+1])
+                else:
+                    expert_output = expert(x_q[b:b+1], None)
+
+                delta_x_f[b:b+1] += weight * expert_output
+        #torch.Size([32, 20, 768])
+        x_f_updated = x_q + self.gate_1(self.alpha_1) * delta_x_f
+
+        if self.combine:
+            # torch.Size([32, 59, 768])
+            x_comb = torch.cat((x_prev, x_f_updated), dim=1)
+            # PAPER: gated cross-attention version (torch.Size([32, 59, 768]))
+            x_f_updated = x_comb + self.gate_2(self.alpha_2) * self.mlp(self.ln_2(x_comb))
+            # ablation: no-gate version
+            # x = x_comb + self.mlp(self.ln_2(x_comb))
+            # x = x_comb + self.mlp(self.ln_2(x_comb))
+        else:
+            # vanilla cross-attention implementation
+            x_f_updated = x_f_updated + self.gate_2(self.alpha_2) * self.mlp(self.ln_2(x_f_updated))
+        # x = (x, cache)
+        x_f_updated = (x_f_updated,)
+        return x_f_updated
