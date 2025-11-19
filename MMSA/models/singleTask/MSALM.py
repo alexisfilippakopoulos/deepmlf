@@ -1315,8 +1315,13 @@ class MoeMMBlock(nn.Module):
 
         # combined cross-attention
         self.combine = config.get("combine", False)
-        #self.register_buffer('expert_usage', torch.zeros(4))
-        self.router_stats = []
+        self.expert_usage_stats = {
+            'layer_idx': self.idx,
+            'audio_expert': 0,
+            'visual_expert': 0,
+            'av_expert': 0,
+            'identity_expert': 0,
+        }
 
     def forward(self, x_q, z_a, z_v, z_av, x_prev=None, x_kv=None):
         #import pdb; pdb.set_trace()
@@ -1350,7 +1355,7 @@ class MoeMMBlock(nn.Module):
                     expert_output = expert(x_q[b:b+1], None)
 
                 delta_x_f[b:b+1] += weight * expert_output
-        #torch.Size([32, 20, 768])
+
         x_f_updated = x_q + self.gate_1(self.alpha_1) * delta_x_f
 
         if self.combine:
