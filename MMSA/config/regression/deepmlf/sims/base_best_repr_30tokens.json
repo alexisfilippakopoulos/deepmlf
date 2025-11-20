@@ -1,6 +1,6 @@
 {
     "datasetCommonParams": {
-        "dataset_root_dir": "/home/alex/Downloads/MSA-Datasets",
+        "dataset_root_dir": "/kaggle/input",
         "mosi": {
             "aligned": {
                 "featurePath": "mosi/Processed/aligned_50.pkl",
@@ -115,7 +115,7 @@
         },
         "sims": {
             "unaligned": {
-                "featurePath": "CH-SIMS/Processed/unaligned_39.pkl",
+                "featurePath": "ch-sims/unaligned_39.pkl",
                 "seq_lens": [
                     39,
                     400,
@@ -236,7 +236,7 @@
                 "av_enc": {
                     "finetune": true,
                     "from_pretrained": true,
-                    "path_to_pretrained": "/home/alex/Downloads/bienc-sims-1990.pth",
+                    "path_to_pretrained": "/kaggle/input/bienc-sims-1990/pytorch/default/1/bienc-sims-1990.pth",
                     "feature_dims": [
                         768,
                         33,
