@@ -724,7 +724,7 @@ class msaLMMixin(nn.Module):
         ca_layers = nn.ModuleList(
             [
                 MoeMMBlock(
-                    self.msa_config["mmgpt"], layer_idx, top_k=2
+                    self.msa_config["mmgpt"], layer_idx, top_k=3
                 )
                 for layer_idx in range(len(ca_list))
             ]
@@ -1036,13 +1036,12 @@ class MSALM(nn.Module):
         z_a, z_v, z_av = self._encode_av(audio_x=audio_x, vision_x=vision_x)
         # print("calling _av_conditioning")
         self._av_conditioning(z_a, z_v, z_av)
-
+        #import pdb; pdb.set_trace()
         outputs = self.lang_encoder(
             input_ids=lang_x,
             attention_mask=attention_mask,
             **kwargs
         )
-
         lm_logits = outputs.logits
         last_hidden_states = outputs.hidden_states[-1]
         
@@ -1140,6 +1139,7 @@ class MSALM(nn.Module):
                 "av_logits": av_logits,
                 "bn_logits": bn_logits,
                 "lm_logits": lm_logits,
+                "expert_usage_stats": expert_usage_stats
             } 
 
             # return lm_logits, task_logits, av_logits, bn_logits, text_logits
@@ -1315,13 +1315,19 @@ class MoeMMBlock(nn.Module):
 
         # combined cross-attention
         self.combine = config.get("combine", False)
+        self.reset_expert_usage_stats()
+
+    def reset_expert_usage_stats(self):
         self.expert_usage_stats = {
             'layer_idx': self.idx,
-            'audio_expert': 0,
-            'visual_expert': 0,
-            'av_expert': 0,
-            'identity_expert': 0,
+            0: 0, # audio expert
+            1: 0, # visual expert
+            2: 0, # av expert
+            3: 0, # identity expert
         }
+
+    def get_expert_usage_stats(self):
+        return self.expert_usage_stats.copy()
 
     def forward(self, x_q, z_a, z_v, z_av, x_prev=None, x_kv=None):
         #import pdb; pdb.set_trace()
@@ -1343,6 +1349,7 @@ class MoeMMBlock(nn.Module):
         for b in range(B):
             for k in range(self.top_k):
                 expert_idx = top_k_indices[b, k].item()
+                self.expert_usage_stats[expert_idx] += 1
                 weight = top_k_weights[b, k]
                 
                 # Get expert and corresponding context

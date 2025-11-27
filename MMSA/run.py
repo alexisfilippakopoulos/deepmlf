@@ -354,6 +354,7 @@ def MMSA_run(
         df.to_csv(avg_csv_file, index=None)
         logger.info(f"Results saved to {avg_csv_file}.")
     else: # run normal
+        print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$Running in normal mode.$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
         args = get_config_regression(model_name, dataset_name, config_file)
         # TODO: uncomment
         args['device'] = assign_gpu(gpu_ids)

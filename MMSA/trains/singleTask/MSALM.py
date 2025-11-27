@@ -421,6 +421,7 @@ class MSALM():
                            bn_logits = outputs['bn_logits']
                            text_logits = outputs['text_logits']
                     else:
+                        print ("EIMAI STIN DO TRAINN")
                         outputs = model(text_ids, audio, vision, attention_mask=attention_mask)
                         lm_logits = outputs['lm_logits']
                         task_logits = outputs['task_logits']
