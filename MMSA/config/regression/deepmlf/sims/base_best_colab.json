@@ -236,7 +236,7 @@
                 "av_enc": {
                     "finetune": true,
                     "from_pretrained": true,
-                    "path_to_pretrained": "checkpoints/bienc-sims/bienc-sims-1990.pth",
+                    "path_to_pretrained": "/content/drive/MyDrive/bienc-sims-1990.pth",
                     "feature_dims": [
                         768,
                         33,

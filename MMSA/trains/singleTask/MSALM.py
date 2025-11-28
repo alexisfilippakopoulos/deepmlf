@@ -11,6 +11,8 @@ from torch import optim
 from typing import Optional
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from collections import defaultdict
+import os
+import csv
 
 
 from ...utils import MetricsTop, dict_to_str
@@ -440,10 +442,10 @@ class MSALM():
                         if expert_stats:
                             for stats in expert_stats:
                                 layer_idx = stats['layer_idx']
-                                epoch_expert_stats[layer_idx]['audio'] += stats['audio']
-                                epoch_expert_stats[layer_idx]['visual'] += stats['visual']
-                                epoch_expert_stats[layer_idx]['av'] += stats['av']
-                                epoch_expert_stats[layer_idx]['identity'] += stats['identity']
+                                epoch_expert_stats[layer_idx]['audio'] += stats[0]
+                                epoch_expert_stats[layer_idx]['visual'] += stats[1]
+                                epoch_expert_stats[layer_idx]['av'] += stats[2]
+                                epoch_expert_stats[layer_idx]['identity'] += stats[3]
                     
                     model.reset_expert_usage_stats()
                     av_logits.squeeze_(1)
@@ -1058,6 +1060,8 @@ class ExpertUsageLogger:
     """Helper class to log expert usage statistics to CSV"""
     
     def __init__(self, save_dir):
+        save_dir_split = str(save_dir).split("/")
+        save_dir = save_dir_split[0] + "/" + save_dir_split[1] + "/"
         self.csv_path = os.path.join(save_dir, 'expert_usage_stats.csv')
         self.csv_initialized = False
     

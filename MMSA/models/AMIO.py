@@ -69,7 +69,6 @@ class AMIO(nn.Module):
 
         expert_stats = []
         for layer in self.Model.lang_encoder._get_decoder_layers():
-            print(layer)
             if hasattr(layer, 'ca_layer') and hasattr(layer.ca_layer, 'get_expert_usage_stats'):
                 expert_stats.append(layer.ca_layer.get_expert_usage_stats())
         return expert_stats
