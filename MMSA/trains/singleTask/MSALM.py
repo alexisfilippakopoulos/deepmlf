@@ -10,6 +10,7 @@ from tqdm import tqdm
 from torch import optim
 from typing import Optional
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from collections import defaultdict
 
 
 from ...utils import MetricsTop, dict_to_str
@@ -343,6 +344,9 @@ class MSALM():
         ###########################################################################################
         ## training loop
         ###########################################################################################
+
+        expert_logger = ExpertUsageLogger(self.args.model_save_path)
+
         while True:
             epochs += 1
             # train
@@ -360,6 +364,9 @@ class MSALM():
             bn_total_loss = .0
             av_total_loss = .0
             text_total_loss = .0
+
+            epoch_expert_stats = defaultdict(lambda: {'audio': 0, 'visual': 0, 'av': 0, 'identity': 0})
+
             # loss = .0
             left_epochs = self.args.update_epochs
             ids = []
@@ -428,6 +435,17 @@ class MSALM():
                         av_logits = outputs['av_logits']
                         bn_logits = outputs['bn_logits']
                         text_logits = outputs['text_logits']
+                        expert_stats = model.get_expert_usage_stats()
+
+                        if expert_stats:
+                            for stats in expert_stats:
+                                layer_idx = stats['layer_idx']
+                                epoch_expert_stats[layer_idx]['audio'] += stats['audio']
+                                epoch_expert_stats[layer_idx]['visual'] += stats['visual']
+                                epoch_expert_stats[layer_idx]['av'] += stats['av']
+                                epoch_expert_stats[layer_idx]['identity'] += stats['identity']
+                    
+                    model.reset_expert_usage_stats()
                     av_logits.squeeze_(1)
 
                     # compute loss
@@ -763,6 +781,9 @@ class MSALM():
             av_total_loss = av_total_loss / len(dataloader['train'])
             text_total_loss = text_total_loss / len(dataloader['train'])
             lm_loss = lm_loss / len(dataloader['train'])
+
+            expert_logger.log_epoch_stats(epochs, epoch_expert_stats)
+
             # if self.modded_loss:
             #     bn_total_loss = bn_total_loss / len(dataloader['train'])
             # mse_loss = mse_loss / len(dataloader['train'])
@@ -1032,3 +1053,93 @@ class MSALM():
         logger.info(f"{mode}-({self.args.model_name}-{modal}) >> {dict_to_str(eval_results)}")
 
         return eval_results
+
+class ExpertUsageLogger:
+    """Helper class to log expert usage statistics to CSV"""
+    
+    def __init__(self, save_dir):
+        self.csv_path = os.path.join(save_dir, 'expert_usage_stats.csv')
+        self.csv_initialized = False
+    
+    def log_epoch_stats(self, epoch, epoch_expert_stats):
+        """
+        Log expert usage statistics for an epoch to CSV and print summary
+        
+        Args:
+            epoch (int): Current epoch number
+            epoch_expert_stats (dict): Dictionary mapping layer_idx to expert usage counts
+        """
+        if not epoch_expert_stats:
+            return
+        
+        # Initialize CSV file with headers on first epoch
+        if not self.csv_initialized:
+            self._initialize_csv(epoch_expert_stats)
+            self.csv_initialized = True
+        
+        # Write epoch data
+        self._write_epoch_data(epoch, epoch_expert_stats)
+        
+        # Print summary for this epoch
+        self._print_epoch_summary(epoch, epoch_expert_stats)
+    
+    def _initialize_csv(self, epoch_expert_stats):
+        """Create CSV file with headers"""
+        with open(self.csv_path, 'w', newline='') as csvfile:
+            layer_indices = sorted(epoch_expert_stats.keys())
+            
+            # Create header
+            headers = ['epoch']
+            for layer_idx in layer_indices:
+                headers.extend([
+                    f'layer_{layer_idx}_audio',
+                    f'layer_{layer_idx}_visual',
+                    f'layer_{layer_idx}_av',
+                    f'layer_{layer_idx}_identity',
+                    f'layer_{layer_idx}_total'
+                ])
+            
+            writer = csv.writer(csvfile)
+            writer.writerow(headers)
+    
+    def _write_epoch_data(self, epoch, epoch_expert_stats):
+        """Append epoch statistics to CSV"""
+        with open(self.csv_path, 'a', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            
+            layer_indices = sorted(epoch_expert_stats.keys())
+            row = [epoch]
+            
+            for layer_idx in layer_indices:
+                stats = epoch_expert_stats[layer_idx]
+                total = sum(stats.values())
+                row.extend([
+                    stats['audio'],
+                    stats['visual'],
+                    stats['av'],
+                    stats['identity'],
+                    total
+                ])
+            
+            writer.writerow(row)
+    
+    def _print_epoch_summary(self, epoch, epoch_expert_stats):
+        """Print human-readable summary of expert usage"""
+        print(f"\n{'='*50}")
+        print(f"Epoch {epoch} Expert Usage Summary")
+        print(f"{'='*50}")
+        
+        for layer_idx in sorted(epoch_expert_stats.keys()):
+            stats = epoch_expert_stats[layer_idx]
+            total = sum(stats.values())
+            
+            if total == 0:
+                continue
+                
+            print(f"\nLayer {layer_idx}:")
+            print(f"  Audio:    {stats['audio']:6d} ({100*stats['audio']/total:5.1f}%)")
+            print(f"  Visual:   {stats['visual']:6d} ({100*stats['visual']/total:5.1f}%)")
+            print(f"  AV:       {stats['av']:6d} ({100*stats['av']/total:5.1f}%)")
+            print(f"  Identity: {stats['identity']:6d} ({100*stats['identity']/total:5.1f}%)")
+            print(f"  Total:    {total:6d}")
+        print(f"{'='*50}\n")

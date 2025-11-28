@@ -61,3 +61,25 @@ class AMIO(nn.Module):
             text_x, audio_x, video_x = self.alignNet(text_x, audio_x, video_x)
 
         return self.Model.vnl_forward(text_x, audio_x, video_x, *args, **kwargs)
+    
+    def get_expert_usage_stats(self):
+        """Collect expert usage statistics from MoE layers"""
+        if not hasattr(self.Model, 'lang_encoder'):
+            return []
+
+        expert_stats = []
+        for layer in self.Model.lang_encoder._get_decoder_layers():
+            print(layer)
+            if hasattr(layer, 'ca_layer') and hasattr(layer.ca_layer, 'get_expert_usage_stats'):
+                expert_stats.append(layer.ca_layer.get_expert_usage_stats())
+        return expert_stats
+    
+    def reset_expert_usage_stats(self):
+        """Reset expert usage statistics for all MoE layers"""
+        if not hasattr(self.Model, 'lang_encoder'):
+            return
+        
+        for layer in self.Model.lang_encoder._get_decoder_layers():
+            if hasattr(layer, 'ca_layer') and hasattr(layer.ca_layer, 'reset_expert_usage_stats'):
+                layer.ca_layer.reset_expert_usage_stats()
+

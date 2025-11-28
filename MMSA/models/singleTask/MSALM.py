@@ -1138,8 +1138,7 @@ class MSALM(nn.Module):
                 "text_logits": text_logits,
                 "av_logits": av_logits,
                 "bn_logits": bn_logits,
-                "lm_logits": lm_logits,
-                "expert_usage_stats": expert_usage_stats
+                "lm_logits": lm_logits
             } 
 
             # return lm_logits, task_logits, av_logits, bn_logits, text_logits
