@@ -1315,6 +1315,7 @@ class MoeMMBlock(nn.Module):
         # combined cross-attention
         self.combine = config.get("combine", False)
         self.reset_expert_usage_stats()
+        self.reset_router_weights_tracking()
 
     def reset_expert_usage_stats(self):
         self.expert_usage_stats = {
@@ -1327,6 +1328,57 @@ class MoeMMBlock(nn.Module):
 
     def get_expert_usage_stats(self):
         return self.expert_usage_stats.copy()
+    
+    def reset_router_weights_tracking(self):
+        # list fo weights assigned to each expert
+        self.router_weights_accumulator = {
+            'audio': [],   
+            'visual': [],  
+            'av': [],      
+            'identity': [],
+        }
+        self.routing_entropy_accumulator = []
+        self.num_routing_decisions = 0
+
+    def get_router_weights_stats(self):
+        """
+        Retrieve router weight statistics
+        
+        Returns:
+            dict: Statistics including mean, std, min, max for each expert's weights
+        """
+        import numpy as np
+        
+        stats = {
+            'layer_idx': self.idx,
+            'num_decisions': self.num_routing_decisions,
+        }
+        
+        expert_names = ['audio', 'visual', 'av', 'identity']
+        for name in expert_names:
+            weights = self.router_weights_accumulator[name]
+            if weights:
+                stats[f'{name}_mean'] = np.mean(weights)
+                stats[f'{name}_std'] = np.std(weights)
+                stats[f'{name}_min'] = np.min(weights)
+                stats[f'{name}_max'] = np.max(weights)
+                stats[f'{name}_median'] = np.median(weights)
+            else:
+                stats[f'{name}_mean'] = 0.0
+                stats[f'{name}_std'] = 0.0
+                stats[f'{name}_min'] = 0.0
+                stats[f'{name}_max'] = 0.0
+                stats[f'{name}_median'] = 0.0
+        
+        # routing entropy statistics
+        if self.routing_entropy_accumulator:
+            stats['entropy_mean'] = np.mean(self.routing_entropy_accumulator)
+            stats['entropy_std'] = np.std(self.routing_entropy_accumulator)
+        else:
+            stats['entropy_mean'] = 0.0
+            stats['entropy_std'] = 0.0
+        
+        return stats
 
     def forward(self, x_q, z_a, z_v, z_av, x_prev=None, x_kv=None):
         #import pdb; pdb.set_trace()
@@ -1378,3 +1430,24 @@ class MoeMMBlock(nn.Module):
         # x = (x, cache)
         x_f_updated = (x_f_updated,)
         return x_f_updated
+    
+    def _track_router_weights(self, all_weights, top_k_weights, top_k_indices):
+        """
+        Track router weights and compute routing statistics
+        
+        Args:
+            all_weights: (B, num_experts) - softmax weights for all experts
+            top_k_weights: (B, top_k) - selected top-k weights
+            top_k_indices: (B, top_k) - indices of selected experts
+        """
+        B = all_weights.size(0)
+        self.num_routing_decisions += B
+        
+        expert_names = ['audio', 'visual', 'av', 'identity']
+        for expert_idx, name in enumerate(expert_names):
+            weights = all_weights[:, expert_idx].detach().cpu().numpy()
+            self.router_weights_accumulator[name].extend(weights.tolist())
+        
+        # calculate and track routing entropy (-sum(p * log(p))), where p are the routing probabilities
+        entropy = -(all_weights * torch.log(all_weights + 1e-10)).sum(dim=-1)
+        self.routing_entropy_accumulator.extend(entropy.detach().cpu().numpy().tolist())

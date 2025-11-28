@@ -82,3 +82,24 @@ class AMIO(nn.Module):
             if hasattr(layer, 'ca_layer') and hasattr(layer.ca_layer, 'reset_expert_usage_stats'):
                 layer.ca_layer.reset_expert_usage_stats()
 
+    def get_router_weights_stats(self):
+        """Collect router weight statistics from MoE layers"""
+        if not hasattr(self.Model, 'lang_encoder'):
+            return {}
+        
+        router_stats = {}
+        for layer in self.Model.lang_encoder._get_decoder_layers():
+            if hasattr(layer, 'ca_layer') and hasattr(layer.ca_layer, 'get_router_weights_stats'):
+                stats = layer.ca_layer.get_router_weights_stats()
+                router_stats[stats['layer_idx']] = stats
+        return router_stats
+    
+    def reset_router_weights_tracking(self):
+        """Reset router weight tracking for all MoE layers"""
+        if not hasattr(self.Model, 'lang_encoder'):
+            return
+        
+        for layer in self.Model.lang_encoder._get_decoder_layers():
+            if hasattr(layer, 'ca_layer') and hasattr(layer.ca_layer, 'reset_router_weights_tracking'):
+                layer.ca_layer.reset_router_weights_tracking()
+
