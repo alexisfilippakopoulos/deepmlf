@@ -1396,8 +1396,7 @@ class MoeMMBlock(nn.Module):
 
         top_k_weights, top_k_indices, all_weights = self.router(norm_x_q)
 
-        if self.training:
-            self._track_routing_statistics(all_weights, top_k_weights, top_k_indices)
+        self._track_routing_statistics(all_weights, top_k_weights, top_k_indices)
 
         delta_x_f = torch.zeros_like(x_q)
 
