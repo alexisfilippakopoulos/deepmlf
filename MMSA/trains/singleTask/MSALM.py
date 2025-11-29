@@ -357,6 +357,7 @@ class MSALM():
                 y_pred = {'fusion': [], 'av': [], 'text': [], 'bn': []}
                 y_true = {'fusion': [], 'av': [], 'text': [], 'bn': []}
             
+            model.reset_epoch_stats()
             model.train()
             # model.init_mmt()
             total_loss = 0.0
@@ -367,8 +368,6 @@ class MSALM():
             av_total_loss = .0
             text_total_loss = .0
 
-            epoch_expert_stats = defaultdict(lambda: {'audio': 0, 'visual': 0, 'av': 0, 'identity': 0})
-            model.reset_router_weights_tracking()
             # loss = .0
             left_epochs = self.args.update_epochs
             ids = []
@@ -437,17 +436,7 @@ class MSALM():
                         av_logits = outputs['av_logits']
                         bn_logits = outputs['bn_logits']
                         text_logits = outputs['text_logits']
-                        expert_stats = model.get_expert_usage_stats()
 
-                        if expert_stats:
-                            for stats in expert_stats:
-                                layer_idx = stats['layer_idx']
-                                epoch_expert_stats[layer_idx]['audio'] += stats[0]
-                                epoch_expert_stats[layer_idx]['visual'] += stats[1]
-                                epoch_expert_stats[layer_idx]['av'] += stats[2]
-                                epoch_expert_stats[layer_idx]['identity'] += stats[3]
-                    
-                    model.reset_expert_usage_stats()
                     av_logits.squeeze_(1)
 
                     # compute loss
@@ -784,7 +773,8 @@ class MSALM():
             text_total_loss = text_total_loss / len(dataloader['train'])
             lm_loss = lm_loss / len(dataloader['train'])
 
-            expert_logger.log_epoch_stats(epochs, epoch_expert_stats)
+            epoch_stats = model.get_epoch_stats()
+            expert_logger.log_epoch_stats(epochs, epoch_stats)
 
             # if self.modded_loss:
             #     bn_total_loss = bn_total_loss / len(dataloader['train'])
@@ -1056,109 +1046,75 @@ class MSALM():
 
         return eval_results
     
+
 class ExpertUsageLogger:
-    """Helper class to log expert usage statistics to CSV"""
+    """Helper class to log expert statistics to CSV"""
     
     def __init__(self, save_dir):
-        self.save_dir = save_dir
         save_dir_split = str(save_dir).split("/")
-        save_dir = save_dir_split[0] + "/" + save_dir_split[1] + "/"
+        self.save_dir = save_dir_split[0] + "/" + save_dir_split[1] + "/"
         self.usage_csv_path = os.path.join(save_dir, 'expert_usage_stats.csv')
         self.weights_csv_path = os.path.join(save_dir, 'router_weights_stats.csv')
+        self.combined_csv_path = os.path.join(save_dir, 'expert_combined_stats.csv')
         self.usage_csv_initialized = False
         self.weights_csv_initialized = False
+        self.combined_csv_initialized = False
     
-    def log_epoch_stats(self, epoch, epoch_expert_stats, epoch_router_weights_stats=None):
+    def log_epoch_stats(self, epoch, epoch_stats):
         """
-        Log expert usage and router weight statistics for an epoch
+        Log complete epoch statistics (usage + router weights combined)
         
         Args:
             epoch (int): Current epoch number
-            epoch_expert_stats (dict): Dictionary mapping layer_idx to expert usage counts
-            epoch_router_weights_stats (dict): Dictionary mapping layer_idx to router weight stats
+            epoch_stats (dict): Dictionary mapping layer_idx to complete statistics
         """
-        if epoch_expert_stats:
-            if not self.usage_csv_initialized:
-                self._initialize_usage_csv(epoch_expert_stats)
-                self.usage_csv_initialized = True
-            self._write_usage_data(epoch, epoch_expert_stats)
-            self._print_usage_summary(epoch, epoch_expert_stats)
+        if not epoch_stats:
+            return
         
-        if epoch_router_weights_stats:
-            if not self.weights_csv_initialized:
-                self._initialize_weights_csv(epoch_router_weights_stats)
-                self.weights_csv_initialized = True
-            self._write_weights_data(epoch, epoch_router_weights_stats)
-            self._print_weights_summary(epoch, epoch_router_weights_stats)
+        self._log_usage_stats(epoch, epoch_stats)
+        self._log_weights_stats(epoch, epoch_stats)
     
-    def _initialize_usage_csv(self, epoch_expert_stats):
-        """Create CSV file with headers for usage stats"""
-        with open(self.usage_csv_path, 'w', newline='') as csvfile:
-            layer_indices = sorted(epoch_expert_stats.keys())
-            
-            headers = ['epoch']
-            for layer_idx in layer_indices:
-                headers.extend([
-                    f'layer_{layer_idx}_audio',
-                    f'layer_{layer_idx}_visual',
-                    f'layer_{layer_idx}_av',
-                    f'layer_{layer_idx}_identity',
-                    f'layer_{layer_idx}_total'
-                ])
-            
-            writer = csv.writer(csvfile)
-            writer.writerow(headers)
+        self._log_combined_stats(epoch, epoch_stats)
+        
+        self._print_epoch_summary(epoch, epoch_stats)
     
-    def _initialize_weights_csv(self, epoch_router_weights_stats):
-        """Create CSV file with headers for router weight stats"""
-        with open(self.weights_csv_path, 'w', newline='') as csvfile:
-            layer_indices = sorted(epoch_router_weights_stats.keys())
-            
-            headers = ['epoch']
-            for layer_idx in layer_indices:
-                for expert in ['audio', 'visual', 'av', 'identity']:
-                    headers.extend([
-                        f'layer_{layer_idx}_{expert}_mean',
-                        f'layer_{layer_idx}_{expert}_std',
-                        f'layer_{layer_idx}_{expert}_median',
-                    ])
-                headers.extend([
-                    f'layer_{layer_idx}_entropy_mean',
-                    f'layer_{layer_idx}_entropy_std',
-                ])
-            
-            writer = csv.writer(csvfile)
-            writer.writerow(headers)
-    
-    def _write_usage_data(self, epoch, epoch_expert_stats):
-        """Append epoch usage statistics to CSV"""
+    def _log_usage_stats(self, epoch, epoch_stats):
+        """Log expert usage counts"""
+        if not self.usage_csv_initialized:
+            self._initialize_usage_csv(epoch_stats)
+            self.usage_csv_initialized = True
+        
         with open(self.usage_csv_path, 'a', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            layer_indices = sorted(epoch_expert_stats.keys())
+            layer_indices = sorted(epoch_stats.keys())
             row = [epoch]
             
             for layer_idx in layer_indices:
-                stats = epoch_expert_stats[layer_idx]
-                total = sum(stats.values())
+                usage = epoch_stats[layer_idx]['usage']
+                total = sum(usage.values())
                 row.extend([
-                    stats['audio'],
-                    stats['visual'],
-                    stats['av'],
-                    stats['identity'],
+                    usage['audio'],
+                    usage['visual'],
+                    usage['av'],
+                    usage['identity'],
                     total
                 ])
             
             writer.writerow(row)
     
-    def _write_weights_data(self, epoch, epoch_router_weights_stats):
-        """Append epoch router weight statistics to CSV"""
+    def _log_weights_stats(self, epoch, epoch_stats):
+        """Log router weight statistics"""
+        if not self.weights_csv_initialized:
+            self._initialize_weights_csv(epoch_stats)
+            self.weights_csv_initialized = True
+        
         with open(self.weights_csv_path, 'a', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            layer_indices = sorted(epoch_router_weights_stats.keys())
+            layer_indices = sorted(epoch_stats.keys())
             row = [epoch]
             
             for layer_idx in layer_indices:
-                stats = epoch_router_weights_stats[layer_idx]
+                stats = epoch_stats[layer_idx]
                 for expert in ['audio', 'visual', 'av', 'identity']:
                     row.extend([
                         stats[f'{expert}_mean'],
@@ -1172,38 +1128,124 @@ class ExpertUsageLogger:
             
             writer.writerow(row)
     
-    def _print_usage_summary(self, epoch, epoch_expert_stats):
-        """Print human-readable summary of expert usage"""
-        print(f"\n{'='*60}")
-        print(f"Epoch {epoch} - Expert Usage Summary")
-        print(f"{'='*60}")
+    def _log_combined_stats(self, epoch, epoch_stats):
+        """Log combined usage and weights for easier analysis"""
+        if not self.combined_csv_initialized:
+            self._initialize_combined_csv(epoch_stats)
+            self.combined_csv_initialized = True
         
-        for layer_idx in sorted(epoch_expert_stats.keys()):
-            stats = epoch_expert_stats[layer_idx]
-            total = sum(stats.values())
+        with open(self.combined_csv_path, 'a', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            layer_indices = sorted(epoch_stats.keys())
+            row = [epoch]
+            
+            for layer_idx in layer_indices:
+                stats = epoch_stats[layer_idx]
+                usage = stats['usage']
+                total_usage = sum(usage.values())
+                
+                for expert in ['audio', 'visual', 'av', 'identity']:
+                    usage_pct = 100 * usage[expert] / total_usage if total_usage > 0 else 0
+                    row.extend([
+                        usage[expert],
+                        usage_pct,
+                        stats[f'{expert}_mean'],
+                        stats[f'{expert}_std'],
+                    ])
+                row.extend([
+                    stats['entropy_mean'],
+                    stats['num_decisions'],
+                ])
+            
+            writer.writerow(row)
+    
+    def _initialize_usage_csv(self, epoch_stats):
+        """Initialize usage CSV with headers"""
+        with open(self.usage_csv_path, 'w', newline='') as csvfile:
+            layer_indices = sorted(epoch_stats.keys())
+            headers = ['epoch']
+            for layer_idx in layer_indices:
+                headers.extend([
+                    f'L{layer_idx}_audio',
+                    f'L{layer_idx}_visual',
+                    f'L{layer_idx}_av',
+                    f'L{layer_idx}_identity',
+                    f'L{layer_idx}_total'
+                ])
+            writer = csv.writer(csvfile)
+            writer.writerow(headers)
+    
+    def _initialize_weights_csv(self, epoch_stats):
+        """Initialize weights CSV with headers"""
+        with open(self.weights_csv_path, 'w', newline='') as csvfile:
+            layer_indices = sorted(epoch_stats.keys())
+            headers = ['epoch']
+            for layer_idx in layer_indices:
+                for expert in ['audio', 'visual', 'av', 'identity']:
+                    headers.extend([
+                        f'L{layer_idx}_{expert}_mean',
+                        f'L{layer_idx}_{expert}_std',
+                        f'L{layer_idx}_{expert}_median',
+                    ])
+                headers.extend([
+                    f'L{layer_idx}_entropy_mean',
+                    f'L{layer_idx}_entropy_std',
+                ])
+            writer = csv.writer(csvfile)
+            writer.writerow(headers)
+    
+    def _initialize_combined_csv(self, epoch_stats):
+        """Initialize combined CSV with headers"""
+        with open(self.combined_csv_path, 'w', newline='') as csvfile:
+            layer_indices = sorted(epoch_stats.keys())
+            headers = ['epoch']
+            for layer_idx in layer_indices:
+                for expert in ['audio', 'visual', 'av', 'identity']:
+                    headers.extend([
+                        f'L{layer_idx}_{expert}_count',
+                        f'L{layer_idx}_{expert}_pct',
+                        f'L{layer_idx}_{expert}_weight_mean',
+                        f'L{layer_idx}_{expert}_weight_std',
+                    ])
+                headers.extend([
+                    f'L{layer_idx}_entropy',
+                    f'L{layer_idx}_decisions',
+                ])
+            writer = csv.writer(csvfile)
+            writer.writerow(headers)
+    
+    def _print_epoch_summary(self, epoch, epoch_stats):
+        """Print comprehensive summary"""
+        print(f"\n{'='*70}")
+        print(f"Epoch {epoch} - Expert Statistics Summary")
+        print(f"{'='*70}")
+        
+        for layer_idx in sorted(epoch_stats.keys()):
+            stats = epoch_stats[layer_idx]
+            usage = stats['usage']
+            total = sum(usage.values())
             
             if total == 0:
                 continue
-                
-            print(f"\nLayer {layer_idx}:")
-            print(f"  Audio:    {stats['audio']:6d} ({100*stats['audio']/total:5.1f}%)")
-            print(f"  Visual:   {stats['visual']:6d} ({100*stats['visual']/total:5.1f}%)")
-            print(f"  AV:       {stats['av']:6d} ({100*stats['av']/total:5.1f}%)")
-            print(f"  Identity: {stats['identity']:6d} ({100*stats['identity']/total:5.1f}%)")
-            print(f"  Total:    {total:6d}")
-    
-    def _print_weights_summary(self, epoch, epoch_router_weights_stats):
-        """Print human-readable summary of router weights"""
-        print(f"\n{'='*60}")
-        print(f"Epoch {epoch} - Router Weights Summary")
-        print(f"{'='*60}")
-        
-        for layer_idx in sorted(epoch_router_weights_stats.keys()):
-            stats = epoch_router_weights_stats[layer_idx]
             
-            print(f"\nLayer {layer_idx} (Decisions: {stats['num_decisions']}):")
-            print(f"  Routing Entropy: {stats['entropy_mean']:.4f} ± {stats['entropy_std']:.4f}")
-            print(f"  Expert Weights (mean ± std):")
+            print(f"\n{'─'*70}")
+            print(f"Layer {layer_idx} (Routing Decisions: {stats['num_decisions']})")
+            print(f"{'─'*70}")
+            print(f"Routing Entropy: {stats['entropy_mean']:.4f} ± {stats['entropy_std']:.4f} "
+                  f"[{stats['entropy_min']:.4f}, {stats['entropy_max']:.4f}]")
+            print(f"\n{'Expert':<10} {'Usage':<12} {'%':<8} {'Weight (mean±std)':<25} {'Range'}")
+            print(f"{'-'*70}")
+            
             for expert in ['audio', 'visual', 'av', 'identity']:
-                print(f"    {expert:8s}: {stats[f'{expert}_mean']:.4f} ± {stats[f'{expert}_std']:.4f} "
-                      f"[{stats[f'{expert}_min']:.4f}, {stats[f'{expert}_max']:.4f}]")
+                usage_count = usage[expert]
+                usage_pct = 100 * usage_count / total
+                weight_mean = stats[f'{expert}_mean']
+                weight_std = stats[f'{expert}_std']
+                weight_min = stats[f'{expert}_min']
+                weight_max = stats[f'{expert}_max']
+                
+                print(f"{expert:<10} {usage_count:>6d}/{total:<5d} {usage_pct:>6.1f}% "
+                      f"{weight_mean:.4f}±{weight_std:.4f}  "
+                      f"[{weight_min:.4f}, {weight_max:.4f}]")
+        
+        print(f"\n{'='*70}\n")

@@ -3,6 +3,7 @@ import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 from typing import Optional
 import torch.distributions as D
@@ -1314,46 +1315,49 @@ class MoeMMBlock(nn.Module):
 
         # combined cross-attention
         self.combine = config.get("combine", False)
-        self.reset_expert_usage_stats()
-        self.reset_router_weights_tracking()
+        self.reset_epoch_stats()
 
-    def reset_expert_usage_stats(self):
+    def reset_epoch_stats(self):
+        """Reset all statistics for a new epoch"""
         self.expert_usage_stats = {
             'layer_idx': self.idx,
-            0: 0, # audio expert
-            1: 0, # visual expert
-            2: 0, # av expert
-            3: 0, # identity expert
+            'audio': 0,
+            'visual': 0,
+            'av': 0,
+            'identity': 0,
         }
-
-    def get_expert_usage_stats(self):
-        return self.expert_usage_stats.copy()
-    
-    def reset_router_weights_tracking(self):
-        # list fo weights assigned to each expert
+        
         self.router_weights_accumulator = {
-            'audio': [],   
-            'visual': [],  
-            'av': [],      
+            'audio': [],
+            'visual': [],
+            'av': [],
             'identity': [],
         }
         self.routing_entropy_accumulator = []
         self.num_routing_decisions = 0
 
-    def get_router_weights_stats(self):
+    def get_epoch_stats(self):
         """
-        Retrieve router weight statistics
+        Retrieve complete epoch statistics including usage and router weights
         
         Returns:
-            dict: Statistics including mean, std, min, max for each expert's weights
+            dict: Complete statistics for the epoch
         """
-        import numpy as np
         
         stats = {
             'layer_idx': self.idx,
             'num_decisions': self.num_routing_decisions,
         }
         
+        # expert usage
+        stats['usage'] = {
+            'audio': self.expert_usage_stats['audio'],
+            'visual': self.expert_usage_stats['visual'],
+            'av': self.expert_usage_stats['av'],
+            'identity': self.expert_usage_stats['identity'],
+        }
+        
+        # router weight
         expert_names = ['audio', 'visual', 'av', 'identity']
         for name in expert_names:
             weights = self.router_weights_accumulator[name]
@@ -1370,13 +1374,17 @@ class MoeMMBlock(nn.Module):
                 stats[f'{name}_max'] = 0.0
                 stats[f'{name}_median'] = 0.0
         
-        # routing entropy statistics
+        # routing entropy
         if self.routing_entropy_accumulator:
             stats['entropy_mean'] = np.mean(self.routing_entropy_accumulator)
             stats['entropy_std'] = np.std(self.routing_entropy_accumulator)
+            stats['entropy_min'] = np.min(self.routing_entropy_accumulator)
+            stats['entropy_max'] = np.max(self.routing_entropy_accumulator)
         else:
             stats['entropy_mean'] = 0.0
             stats['entropy_std'] = 0.0
+            stats['entropy_min'] = 0.0
+            stats['entropy_max'] = 0.0
         
         return stats
 
@@ -1387,6 +1395,9 @@ class MoeMMBlock(nn.Module):
         norm_x_q = self.ln_1(x_q)
 
         top_k_weights, top_k_indices, all_weights = self.router(norm_x_q)
+
+        if self.training:
+            self._track_routing_statistics(all_weights, top_k_weights, top_k_indices)
 
         delta_x_f = torch.zeros_like(x_q)
 
@@ -1431,9 +1442,9 @@ class MoeMMBlock(nn.Module):
         x_f_updated = (x_f_updated,)
         return x_f_updated
     
-    def _track_router_weights(self, all_weights, top_k_weights, top_k_indices):
+    def _track_routing_statistics(self, all_weights, top_k_weights, top_k_indices):
         """
-        Track router weights and compute routing statistics
+        Track both expert usage counts and router weights
         
         Args:
             all_weights: (B, num_experts) - softmax weights for all experts
@@ -1444,10 +1455,19 @@ class MoeMMBlock(nn.Module):
         self.num_routing_decisions += B
         
         expert_names = ['audio', 'visual', 'av', 'identity']
+        
+        # Track usage counts (which experts were actually selected)
+        for b in range(B):
+            for k in range(self.top_k):
+                expert_idx = top_k_indices[b, k].item()
+                expert_name = expert_names[expert_idx]
+                self.expert_usage_stats[expert_name] += 1
+        
+        # Track router weights (all weights, not just top-k)
         for expert_idx, name in enumerate(expert_names):
             weights = all_weights[:, expert_idx].detach().cpu().numpy()
             self.router_weights_accumulator[name].extend(weights.tolist())
         
-        # calculate and track routing entropy (-sum(p * log(p))), where p are the routing probabilities
+        # Track routing entropy
         entropy = -(all_weights * torch.log(all_weights + 1e-10)).sum(dim=-1)
         self.routing_entropy_accumulator.extend(entropy.detach().cpu().numpy().tolist())
