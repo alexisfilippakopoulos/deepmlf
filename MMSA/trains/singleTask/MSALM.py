@@ -773,8 +773,8 @@ class MSALM():
             text_total_loss = text_total_loss / len(dataloader['train'])
             lm_loss = lm_loss / len(dataloader['train'])
 
-            epoch_stats = model.get_epoch_stats()
-            expert_logger.log_epoch_stats(epochs, epoch_stats)
+            train_expert_stats = model.get_epoch_stats()
+            expert_logger.log_epoch_stats(epochs, train_expert_stats, split='train')
 
             # if self.modded_loss:
             #     bn_total_loss = bn_total_loss / len(dataloader['train'])
@@ -808,6 +808,9 @@ class MSALM():
                 )
             # validation
             val_results = self.do_test(model, dataloader['valid'], mode="VAL")
+            val_expert_stats = val_results.get("ExpertStats", {})
+            expert_logger.log_epoch_stats(epochs, val_expert_stats, split='valid')
+    
             cur_valid = val_results[self.args.KeyEval]
             # if self.warmup_epochs < epochs:
             #     scheduler.step(val_results['Loss'])
@@ -825,6 +828,9 @@ class MSALM():
                 epoch_results['train'].append(train_results)
                 epoch_results['valid'].append(val_results)
                 test_results = self.do_test(model, dataloader['test'], mode="TEST")
+                test_expert_stats = test_results.get("ExpertStats", {})
+                expert_logger.log_epoch_stats(epochs, test_expert_stats, split='test')
+    
                 epoch_results['test'].append(test_results)
             # early stop
             if epochs - best_epoch >= self.args.early_stop:
@@ -859,6 +865,7 @@ class MSALM():
                 "Feature_f": [],
             }
         ids = []
+        model.reset_epoch_stats()
         with torch.no_grad():
             with tqdm(dataloader) as td:
                 for batch_data in td:
@@ -992,6 +999,7 @@ class MSALM():
                     else:    
                         y_pred.append(last_non_zero_logits.to(torch.float32).cpu().detach())
                         y_true.append(labels.cpu())
+        eval_expert_stats = model.get_epoch_stats()
         eval_loss = eval_loss / len(dataloader)
         if self.use_ulgm:
             pred, true = torch.cat(y_pred["fusion"]), torch.cat(y_true["fusion"])
@@ -1003,7 +1011,7 @@ class MSALM():
             eval_results = self.metrics(pred, true)
             eval_results["Loss"] = round(eval_loss, 4)
             logger.info(f"{mode}-({self.args.model_name}) >> {dict_to_str(eval_results)}")
-
+        eval_results["ExpertStats"] = eval_expert_stats
         if return_sample_results:
             eval_results["Ids"] = ids
             eval_results["SResults"] = sample_results
@@ -1045,46 +1053,62 @@ class MSALM():
         logger.info(f"{mode}-({self.args.model_name}-{modal}) >> {dict_to_str(eval_results)}")
 
         return eval_results
-    
-
+        
 class ExpertUsageLogger:
     """Helper class to log expert statistics to CSV"""
     
     def __init__(self, save_dir):
+        save_dir = save_dir
         save_dir_split = str(save_dir).split("/")
         self.save_dir = save_dir_split[0] + "/" + save_dir_split[1] + "/"
-        self.usage_csv_path = os.path.join(self.save_dir, 'expert_usage_stats.csv')
-        self.weights_csv_path = os.path.join(self.save_dir, 'router_weights_stats.csv')
-        self.combined_csv_path = os.path.join(self.save_dir, 'expert_combined_stats.csv')
-        self.usage_csv_initialized = False
-        self.weights_csv_initialized = False
-        self.combined_csv_initialized = False
+        self.csv_paths = {
+            'train': {
+                'usage': os.path.join(self.save_dir, 'expert_usage_train.csv'),
+                'weights': os.path.join(self.save_dir, 'router_weights_train.csv'),
+                'combined': os.path.join(self.save_dir, 'expert_combined_train.csv'),
+            },
+            'valid': {
+                'usage': os.path.join(self.save_dir, 'expert_usage_valid.csv'),
+                'weights': os.path.join(self.save_dir, 'router_weights_valid.csv'),
+                'combined': os.path.join(self.save_dir, 'expert_combined_valid.csv'),
+            },
+            'test': {
+                'usage': os.path.join(self.save_dir, 'expert_usage_test.csv'),
+                'weights': os.path.join(self.save_dir, 'router_weights_test.csv'),
+                'combined': os.path.join(self.save_dir, 'expert_combined_test.csv'),
+            }
+        }
+        self.csv_initialized = {
+            'train': {'usage': False, 'weights': False, 'combined': False},
+            'valid': {'usage': False, 'weights': False, 'combined': False},
+            'test': {'usage': False, 'weights': False, 'combined': False},
+        }
     
-    def log_epoch_stats(self, epoch, epoch_stats):
+    def log_epoch_stats(self, epoch, epoch_stats, split='train'):
         """
-        Log complete epoch statistics (usage + router weights combined)
+        Log complete epoch statistics for a specific split (train/valid/test)
         
         Args:
             epoch (int): Current epoch number
             epoch_stats (dict): Dictionary mapping layer_idx to complete statistics
+            split (str): One of 'train', 'valid', or 'test'
         """
-        if not epoch_stats:
+        if not epoch_stats or split not in self.csv_paths:
             return
-        
-        self._log_usage_stats(epoch, epoch_stats)
-        self._log_weights_stats(epoch, epoch_stats)
+
+        self._log_usage_stats(epoch, epoch_stats, split)
+        self._log_weights_stats(epoch, epoch_stats, split)
+        self._log_combined_stats(epoch, epoch_stats, split)
+
+        self._print_epoch_summary(epoch, epoch_stats, split)
     
-        self._log_combined_stats(epoch, epoch_stats)
+    def _log_usage_stats(self, epoch, epoch_stats, split):
+        """Log expert usage counts for a specific split"""
+        if not self.csv_initialized[split]['usage']:
+            self._initialize_csv(epoch_stats, split, 'usage')
+            self.csv_initialized[split]['usage'] = True
         
-        self._print_epoch_summary(epoch, epoch_stats)
-    
-    def _log_usage_stats(self, epoch, epoch_stats):
-        """Log expert usage counts"""
-        if not self.usage_csv_initialized:
-            self._initialize_usage_csv(epoch_stats)
-            self.usage_csv_initialized = True
-        
-        with open(self.usage_csv_path, 'a', newline='') as csvfile:
+        with open(self.csv_paths[split]['usage'], 'a', newline='') as csvfile:
             writer = csv.writer(csvfile)
             layer_indices = sorted(epoch_stats.keys())
             row = [epoch]
@@ -1102,13 +1126,13 @@ class ExpertUsageLogger:
             
             writer.writerow(row)
     
-    def _log_weights_stats(self, epoch, epoch_stats):
-        """Log router weight statistics"""
-        if not self.weights_csv_initialized:
-            self._initialize_weights_csv(epoch_stats)
-            self.weights_csv_initialized = True
+    def _log_weights_stats(self, epoch, epoch_stats, split):
+        """Log router weight statistics for a specific split"""
+        if not self.csv_initialized[split]['weights']:
+            self._initialize_csv(epoch_stats, split, 'weights')
+            self.csv_initialized[split]['weights'] = True
         
-        with open(self.weights_csv_path, 'a', newline='') as csvfile:
+        with open(self.csv_paths[split]['weights'], 'a', newline='') as csvfile:
             writer = csv.writer(csvfile)
             layer_indices = sorted(epoch_stats.keys())
             row = [epoch]
@@ -1128,13 +1152,13 @@ class ExpertUsageLogger:
             
             writer.writerow(row)
     
-    def _log_combined_stats(self, epoch, epoch_stats):
-        """Log combined usage and weights for easier analysis"""
-        if not self.combined_csv_initialized:
-            self._initialize_combined_csv(epoch_stats)
-            self.combined_csv_initialized = True
+    def _log_combined_stats(self, epoch, epoch_stats, split):
+        """Log combined usage and weights for a specific split"""
+        if not self.csv_initialized[split]['combined']:
+            self._initialize_csv(epoch_stats, split, 'combined')
+            self.csv_initialized[split]['combined'] = True
         
-        with open(self.combined_csv_path, 'a', newline='') as csvfile:
+        with open(self.csv_paths[split]['combined'], 'a', newline='') as csvfile:
             writer = csv.writer(csvfile)
             layer_indices = sorted(epoch_stats.keys())
             row = [epoch]
@@ -1159,10 +1183,11 @@ class ExpertUsageLogger:
             
             writer.writerow(row)
     
-    def _initialize_usage_csv(self, epoch_stats):
-        """Initialize usage CSV with headers"""
-        with open(self.usage_csv_path, 'w', newline='') as csvfile:
-            layer_indices = sorted(epoch_stats.keys())
+    def _initialize_csv(self, epoch_stats, split, csv_type):
+        """Initialize CSV with appropriate headers"""
+        layer_indices = sorted(epoch_stats.keys())
+        
+        if csv_type == 'usage':
             headers = ['epoch']
             for layer_idx in layer_indices:
                 headers.extend([
@@ -1172,13 +1197,7 @@ class ExpertUsageLogger:
                     f'L{layer_idx}_identity',
                     f'L{layer_idx}_total'
                 ])
-            writer = csv.writer(csvfile)
-            writer.writerow(headers)
-    
-    def _initialize_weights_csv(self, epoch_stats):
-        """Initialize weights CSV with headers"""
-        with open(self.weights_csv_path, 'w', newline='') as csvfile:
-            layer_indices = sorted(epoch_stats.keys())
+        elif csv_type == 'weights':
             headers = ['epoch']
             for layer_idx in layer_indices:
                 for expert in ['audio', 'visual', 'av', 'identity']:
@@ -1191,13 +1210,7 @@ class ExpertUsageLogger:
                     f'L{layer_idx}_entropy_mean',
                     f'L{layer_idx}_entropy_std',
                 ])
-            writer = csv.writer(csvfile)
-            writer.writerow(headers)
-    
-    def _initialize_combined_csv(self, epoch_stats):
-        """Initialize combined CSV with headers"""
-        with open(self.combined_csv_path, 'w', newline='') as csvfile:
-            layer_indices = sorted(epoch_stats.keys())
+        elif csv_type == 'combined':
             headers = ['epoch']
             for layer_idx in layer_indices:
                 for expert in ['audio', 'visual', 'av', 'identity']:
@@ -1211,13 +1224,15 @@ class ExpertUsageLogger:
                     f'L{layer_idx}_entropy',
                     f'L{layer_idx}_decisions',
                 ])
+        
+        with open(self.csv_paths[split][csv_type], 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(headers)
     
-    def _print_epoch_summary(self, epoch, epoch_stats):
-        """Print comprehensive summary"""
+    def _print_epoch_summary(self, epoch, epoch_stats, split):
+        """Print comprehensive summary for a specific split"""
         print(f"\n{'='*70}")
-        print(f"Epoch {epoch} - Expert Statistics Summary")
+        print(f"Epoch {epoch} - {split.upper()} Expert Statistics")
         print(f"{'='*70}")
         
         for layer_idx in sorted(epoch_stats.keys()):
@@ -1231,9 +1246,8 @@ class ExpertUsageLogger:
             print(f"\n{'─'*70}")
             print(f"Layer {layer_idx} (Routing Decisions: {stats['num_decisions']})")
             print(f"{'─'*70}")
-            print(f"Routing Entropy: {stats['entropy_mean']:.4f} ± {stats['entropy_std']:.4f} "
-                  f"[{stats['entropy_min']:.4f}, {stats['entropy_max']:.4f}]")
-            print(f"\n{'Expert':<10} {'Usage':<12} {'%':<8} {'Weight (mean±std)':<25} {'Range'}")
+            print(f"Routing Entropy: {stats['entropy_mean']:.4f} ± {stats['entropy_std']:.4f}")
+            print(f"\n{'Expert':<10} {'Usage':<12} {'%':<8} {'Weight (mean±std)':<20}")
             print(f"{'-'*70}")
             
             for expert in ['audio', 'visual', 'av', 'identity']:
@@ -1241,11 +1255,8 @@ class ExpertUsageLogger:
                 usage_pct = 100 * usage_count / total
                 weight_mean = stats[f'{expert}_mean']
                 weight_std = stats[f'{expert}_std']
-                weight_min = stats[f'{expert}_min']
-                weight_max = stats[f'{expert}_max']
                 
                 print(f"{expert:<10} {usage_count:>6d}/{total:<5d} {usage_pct:>6.1f}% "
-                      f"{weight_mean:.4f}±{weight_std:.4f}  "
-                      f"[{weight_min:.4f}, {weight_max:.4f}]")
+                      f"{weight_mean:.4f}±{weight_std:.4f}")
         
         print(f"\n{'='*70}\n")
