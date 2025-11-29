@@ -1321,17 +1321,17 @@ class MoeMMBlock(nn.Module):
         """Reset all statistics for a new epoch"""
         self.expert_usage_stats = {
             'layer_idx': self.idx,
-            'audio': 0,
-            'visual': 0,
-            'av': 0,
-            'identity': 0,
+            0: 0,
+            1: 0,
+            2: 0,
+            3: 0,
         }
         
         self.router_weights_accumulator = {
-            'audio': [],
-            'visual': [],
-            'av': [],
-            'identity': [],
+            0: [],
+            1: [],
+            2: [],
+            3: [],
         }
         self.routing_entropy_accumulator = []
         self.num_routing_decisions = 0
@@ -1351,16 +1351,16 @@ class MoeMMBlock(nn.Module):
         
         # expert usage
         stats['usage'] = {
-            'audio': self.expert_usage_stats['audio'],
-            'visual': self.expert_usage_stats['visual'],
-            'av': self.expert_usage_stats['av'],
-            'identity': self.expert_usage_stats['identity'],
+            "audio": self.expert_usage_stats[0],
+            "visual": self.expert_usage_stats[1],
+            "av": self.expert_usage_stats[2],
+            "identity": self.expert_usage_stats[3],
         }
         
         # router weight
         expert_names = ['audio', 'visual', 'av', 'identity']
-        for name in expert_names:
-            weights = self.router_weights_accumulator[name]
+        for idx, name in enumerate(expert_names):
+            weights = self.router_weights_accumulator[idx]
             if weights:
                 stats[f'{name}_mean'] = np.mean(weights)
                 stats[f'{name}_std'] = np.std(weights)
@@ -1453,20 +1453,18 @@ class MoeMMBlock(nn.Module):
         """
         B = all_weights.size(0)
         self.num_routing_decisions += B
-        
-        expert_names = ['audio', 'visual', 'av', 'identity']
+
         
         # Track usage counts (which experts were actually selected)
         for b in range(B):
             for k in range(self.top_k):
                 expert_idx = top_k_indices[b, k].item()
-                expert_name = expert_names[expert_idx]
-                self.expert_usage_stats[expert_name] += 1
+                self.expert_usage_stats[expert_idx] += 1
         
         # Track router weights (all weights, not just top-k)
-        for expert_idx, name in enumerate(expert_names):
+        for expert_idx in range(all_weights.size(1)):
             weights = all_weights[:, expert_idx].detach().cpu().numpy()
-            self.router_weights_accumulator[name].extend(weights.tolist())
+            self.router_weights_accumulator[expert_idx].extend(weights.tolist())
         
         # Track routing entropy
         entropy = -(all_weights * torch.log(all_weights + 1e-10)).sum(dim=-1)
