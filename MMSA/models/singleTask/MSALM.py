@@ -725,7 +725,7 @@ class msaLMMixin(nn.Module):
         ca_layers = nn.ModuleList(
             [
                 MoeMMBlock(
-                    self.msa_config["mmgpt"], layer_idx, top_k=3
+                    self.msa_config["mmgpt"], layer_idx, top_k=2
                 )
                 for layer_idx in range(len(ca_list))
             ]
@@ -1411,7 +1411,6 @@ class MoeMMBlock(nn.Module):
         for b in range(B):
             for k in range(self.top_k):
                 expert_idx = top_k_indices[b, k].item()
-                self.expert_usage_stats[expert_idx] += 1
                 weight = top_k_weights[b, k]
                 
                 # Get expert and corresponding context

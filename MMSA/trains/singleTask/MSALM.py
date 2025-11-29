@@ -1053,9 +1053,9 @@ class ExpertUsageLogger:
     def __init__(self, save_dir):
         save_dir_split = str(save_dir).split("/")
         self.save_dir = save_dir_split[0] + "/" + save_dir_split[1] + "/"
-        self.usage_csv_path = os.path.join(save_dir, 'expert_usage_stats.csv')
-        self.weights_csv_path = os.path.join(save_dir, 'router_weights_stats.csv')
-        self.combined_csv_path = os.path.join(save_dir, 'expert_combined_stats.csv')
+        self.usage_csv_path = os.path.join(self.save_dir, 'expert_usage_stats.csv')
+        self.weights_csv_path = os.path.join(self.save_dir, 'router_weights_stats.csv')
+        self.combined_csv_path = os.path.join(self.save_dir, 'expert_combined_stats.csv')
         self.usage_csv_initialized = False
         self.weights_csv_initialized = False
         self.combined_csv_initialized = False
