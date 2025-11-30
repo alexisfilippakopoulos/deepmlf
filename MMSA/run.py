@@ -451,8 +451,11 @@ def _run(args, num_workers=1, is_tune=False, from_sena=False):
     if from_sena:
         final_results = {}
         final_results['train'] = trainer.do_test(model, dataloader['train'], mode="TRAIN", return_sample_results=True)
+        final_results['train'].pop("ExpertStats")
         final_results['valid'] = trainer.do_test(model, dataloader['valid'], mode="VALID", return_sample_results=True)
+        final_results['valid'].pop("ExpertStats")
         final_results['test'] = trainer.do_test(model, dataloader['test'], mode="TEST", return_sample_results=True)
+        final_results['test'].pop("ExpertStats")
     elif is_tune:
         # use valid set to tune hyper parameters
         # results = trainer.do_test(model, dataloader['valid'], mode="VALID")
@@ -477,7 +480,7 @@ def _run(args, num_workers=1, is_tune=False, from_sena=False):
     torch.cuda.empty_cache()
     gc.collect()
     time.sleep(1)
-
+    results.pop("ExpertStats") if not from_sena else None
     return {"epoch_results": epoch_results, 'final_results': final_results} if from_sena else results
 
 

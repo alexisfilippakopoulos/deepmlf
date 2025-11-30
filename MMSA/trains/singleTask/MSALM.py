@@ -1100,7 +1100,7 @@ class ExpertUsageLogger:
         self._log_weights_stats(epoch, epoch_stats, split)
         self._log_combined_stats(epoch, epoch_stats, split)
 
-        self._print_epoch_summary(epoch, epoch_stats, split)
+        #self._print_epoch_summary(epoch, epoch_stats, split)
     
     def _log_usage_stats(self, epoch, epoch_stats, split):
         """Log expert usage counts for a specific split"""
