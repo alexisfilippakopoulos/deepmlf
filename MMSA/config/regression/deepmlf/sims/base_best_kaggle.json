@@ -115,7 +115,7 @@
         },
         "sims": {
             "unaligned": {
-                "featurePath": "ch-sims/Processed/unaligned_39.pkl",
+                "featurePath": "ch-sims/unaligned_39.pkl",
                 "seq_lens": [
                     39,
                     400,
