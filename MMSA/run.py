@@ -18,7 +18,7 @@ from .data_loader import MMDataLoader
 from .models import AMIO
 from .trains import ATIO
 from .utils import assign_gpu, count_parameters, setup_seed
-
+from .trains.singleTask.MSALM import ExpertUsageLogger
 from .models.UHIO import UHIO
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
@@ -471,7 +471,10 @@ def _run(args, num_workers=1, is_tune=False, from_sena=False):
             results = {}
         else:
             results = trainer.do_test(model, dataloader['test'], mode="TEST")
-
+        expert_logger = ExpertUsageLogger(args['model_save_path'])
+        val_expert_stats = results.get("ExpertStats", {})
+        expert_logger.log_epoch_stats(-1, val_expert_stats, split='test')
+    
     if args.get('del_model', False):
         print(f"Deleting stored model from {args['model_save_path']}")
         os.remove(args['model_save_path'])
@@ -480,6 +483,7 @@ def _run(args, num_workers=1, is_tune=False, from_sena=False):
     torch.cuda.empty_cache()
     gc.collect()
     time.sleep(1)
+    
     results.pop("ExpertStats") if not from_sena else None
     return {"epoch_results": epoch_results, 'final_results': final_results} if from_sena else results
 

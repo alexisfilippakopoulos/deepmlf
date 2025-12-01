@@ -836,9 +836,7 @@ class MSALM():
             if epochs - best_epoch >= self.args.early_stop:
                 return epoch_results if return_epoch_results else None
             # if epochs - best_epoch >= 15:
-            #     return epoch_results if return_epoch_results else None
-
-    
+            #     return epoch_results if return_epoch_results else None    
     def do_test(self, model, dataloader, mode="VAL", return_sample_results=False):
         model.eval()
         print(f"Model alphas are")
